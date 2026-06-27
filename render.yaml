@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: trap-link-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: RENDER_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: BOT_MODE
+        value: webhook
+      - key: PORT
+        value: 8080
+      - key: OWNER_CHAT_ID
+        sync: false

